@@ -6,6 +6,7 @@
 <title>Studio aka Wester — Team-Meeting</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/signature_pad/4.2.0/signature_pad.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   :root {
     --petrol: #0D5C63;
@@ -241,6 +242,45 @@
   .post-confirm { display: none; margin-top: 20px; }
   .post-confirm.show { display: block; }
 
+  /* SIGNATURE LOCK */
+  .signature-lock-overlay {
+    position: relative; padding: 28px 20px; text-align: center;
+    background: rgba(0,0,0,0.15); border: 2px dashed rgba(197,165,90,0.15);
+    border-radius: 14px; margin-bottom: 20px;
+  }
+  .signature-lock-overlay .lock-icon {
+    font-size: 36px; margin-bottom: 10px; opacity: 0.4;
+    display: block;
+  }
+  .signature-lock-overlay .lock-text {
+    font-size: 13px; font-weight: 600; color: rgba(197,165,90,0.5);
+    letter-spacing: 0.5px; line-height: 1.5;
+  }
+  .signature-lock-overlay .lock-progress {
+    font-size: 11px; color: rgba(255,255,255,0.25); margin-top: 8px; font-weight: 500;
+  }
+  .signature-unlocked { display: none; }
+  .signature-fields-locked { display: none; }
+  .signature-fields-unlocked { display: block; }
+
+  /* EMAIL STATUS */
+  .email-status {
+    margin-top: 14px; padding: 14px 18px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; text-align: center; display: none;
+  }
+  .email-status.sending {
+    display: block; background: rgba(197,165,90,0.1);
+    border: 1px solid rgba(197,165,90,0.2); color: var(--gold-pale);
+  }
+  .email-status.success {
+    display: block; background: rgba(34,197,94,0.1);
+    border: 1px solid rgba(34,197,94,0.25); color: #86efac;
+  }
+  .email-status.error {
+    display: block; background: rgba(248,113,113,0.1);
+    border: 1px solid rgba(248,113,113,0.25); color: #fca5a5;
+  }
+
   /* OVERLAY */
   .confirmation-overlay { display: none; position: fixed; inset: 0; background: rgba(5,30,33,0.85); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(12px); }
   .confirmation-overlay.show { display: flex; }
@@ -383,6 +423,16 @@
   <div class="signature-section fade-in">
     <h2><span data-de="Bestaetigung &amp; Unterschrift" data-en="Confirmation &amp; Signature">Bestaetigung &amp; Unterschrift</span></h2>
     <p class="signature-subtitle" data-de="Ich bestaetige, dass ich alle Meeting-Punkte gelesen und zur Kenntnis genommen habe." data-en="I confirm that I have read and acknowledged all meeting points.">Ich bestaetige, dass ich alle Meeting-Punkte gelesen und zur Kenntnis genommen habe.</p>
+
+    <!-- LOCK OVERLAY (visible until all checkboxes checked) -->
+    <div class="signature-lock-overlay" id="signatureLock">
+      <span class="lock-icon">&#128274;</span>
+      <div class="lock-text" data-de="Bitte lies und bestaetige zuerst alle Meeting-Punkte, bevor du unterschreiben kannst." data-en="Please read and check off all meeting points before you can sign.">Bitte lies und bestaetige zuerst alle Meeting-Punkte, bevor du unterschreiben kannst.</div>
+      <div class="lock-progress" id="lockProgress">0 / 0 Punkte abgehakt</div>
+    </div>
+
+    <!-- UNLOCKED CONTENT (hidden until all checkboxes checked) -->
+    <div class="signature-fields-locked" id="signatureFields">
     <div class="name-input-group">
       <div class="input-wrapper"><label data-de="Vorname" data-en="First Name">Vorname</label><input type="text" id="firstName" placeholder="Max"></div>
       <div class="input-wrapper"><label data-de="Nachname" data-en="Last Name">Nachname</label><input type="text" id="lastName" placeholder="Mustermann"></div>
@@ -401,9 +451,9 @@
     </div>
     <div class="timestamp-display" id="timestampDisplay"></div>
     <div class="post-confirm" id="postConfirm">
-      <button class="btn-send-email" onclick="sendEmail()">&#9993; <span data-de="Bestaetigung an Manuel senden" data-en="Send confirmation to Manuel">Bestaetigung an Manuel senden</span></button>
-      <div class="email-hint" data-de="Oeffnet dein E-Mail-Programm mit einer vorausgefuellten Nachricht." data-en="Opens your email app with a pre-filled message.">Oeffnet dein E-Mail-Programm mit einer vorausgefuellten Nachricht.</div>
+      <div class="email-status" id="emailStatus"></div>
     </div>
+    </div><!-- /signatureFields -->
   </div>
 
   <div class="footer fade-in">
@@ -465,7 +515,7 @@ function onCheck(cb){
   var item=cb.closest('.meeting-item');
   item.classList.toggle('checked',cb.checked);
   if(cb.checked)createParticles(cb.closest('.checkbox-wrapper'));
-  updateProgress();updateSectionBadges();validateForm();
+  updateProgress();updateSectionBadges();validateForm();updateSignatureAccess();
 }
 function createParticles(w){
   var colors=['#C5A55A','#D9C07E','#A8893E','#E8D9A8'];
@@ -530,6 +580,28 @@ function clearSignature(){
   document.getElementById('canvasHint').classList.remove('hidden');validateForm();
 }
 
+// SIGNATURE ACCESS CONTROL
+function updateSignatureAccess(){
+  var total=getTotalItems();
+  var checked=document.querySelectorAll('.meeting-item input:checked').length;
+  var allChecked=total>0&&checked===total;
+  var lockEl=document.getElementById('signatureLock');
+  var fieldsEl=document.getElementById('signatureFields');
+  var progressEl=document.getElementById('lockProgress');
+  if(allChecked){
+    lockEl.style.display='none';
+    fieldsEl.style.display='block';
+    fieldsEl.classList.remove('signature-fields-locked');
+    fieldsEl.classList.add('signature-fields-unlocked');
+  } else {
+    lockEl.style.display='block';
+    fieldsEl.style.display='none';
+    fieldsEl.classList.add('signature-fields-locked');
+    fieldsEl.classList.remove('signature-fields-unlocked');
+    progressEl.textContent=checked+' / '+total+(currentLang==='de'?' Punkte abgehakt':' items checked');
+  }
+}
+
 // VALIDATION
 function validateForm(){
   var total=getTotalItems();
@@ -560,23 +632,53 @@ function submitMeeting(){
   document.getElementById('submitBtn').disabled=true;document.getElementById('submitBtn').querySelector('span').textContent='BESTAETIGT';
   if(signaturePad)signaturePad.off();
   document.getElementById('postConfirm').classList.add('show');
+  sendConfirmationEmail();
 }
 function closeConfirmation(){document.getElementById('confirmOverlay').classList.remove('show')}
 
-// EMAIL
-function sendEmail(){
+// EMAILJS AUTO-SEND
+// ====================================================================
+// SETUP: Du musst einmalig folgende Schritte machen:
+// 1. Gehe zu https://www.emailjs.com und erstelle einen kostenlosen Account
+// 2. Unter "Email Services" -> "Add New Service" -> Gmail verbinden
+// 3. Unter "Email Templates" -> "Create New Template" mit diesen Variablen:
+//    Subject: Meeting-Bestaetigung: {{from_name}}
+//    Body:    {{message}}
+// 4. Ersetze die 3 Werte unten mit deinen echten IDs
+// ====================================================================
+var EMAILJS_PUBLIC_KEY = '0MjixVOx4DSu7EyXL';
+var EMAILJS_SERVICE_ID = 'service_tdsrqyl';
+var EMAILJS_TEMPLATE_ID = 'mg58nja';
+
+function sendConfirmationEmail(){
+  var statusEl=document.getElementById('emailStatus');
   var name=document.getElementById('firstName').value+' '+document.getElementById('lastName').value;
   var dept=document.getElementById('department').value;
   var now=new Date();
-  var dateStr=now.toLocaleDateString('de-DE',{year:'numeric',month:'long',day:'numeric'});
-  var subject=encodeURIComponent('Meeting-Bestaetigung: '+name+' - '+dateStr);
-  var body=encodeURIComponent('Hallo Manuel,\n\nhiermit bestaetige ich, '+name+(dept?' ('+dept+')':'')+', dass ich alle Punkte des monatlichen Team-Meetings gelesen und zur Kenntnis genommen habe.\n\nDatum: '+dateStr+'\n\nViele Gruesse,\n'+name);
-  window.location.href='mailto:manuel@aka-wester.de?subject='+subject+'&body='+body;
+  var dateStr=now.toLocaleDateString('de-DE',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'});
+
+  statusEl.className='email-status sending';
+  statusEl.textContent='Benachrichtigung wird gesendet...';
+  statusEl.style.display='block';
+
+  emailjs.init(EMAILJS_PUBLIC_KEY);
+  emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+    to_email: 'manuel@aka-wester.de',
+    from_name: name,
+    message: 'Mitarbeiter: '+name+(dept?' ('+dept+')':'')+'\nDatum: '+dateStr+'\n\nAlle '+getTotalItems()+' Meeting-Punkte wurden gelesen und bestaetigt.\n\nDiese Nachricht wurde automatisch gesendet.'
+  }).then(function(){
+    statusEl.className='email-status success';
+    statusEl.innerHTML='&#10003; Manuel wurde automatisch benachrichtigt.';
+  }, function(err){
+    statusEl.className='email-status error';
+    statusEl.innerHTML='Automatische Benachrichtigung fehlgeschlagen. <br><a href="mailto:manuel@aka-wester.de?subject='+encodeURIComponent('Meeting-Bestaetigung: '+name)+'" style="color:#C5A55A;text-decoration:underline;">Klicke hier, um manuell zu senden.</a>';
+    console.log('EmailJS error:',err);
+  });
 }
 
 // INIT
 function initApp(){
-  resizeCanvas();initSignaturePad();setLang('de');
+  resizeCanvas();initSignaturePad();setLang('de');updateSignatureAccess();
   window.addEventListener('resize',function(){resizeCanvas();initSignaturePad()});
 }
 </script>
